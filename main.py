@@ -20,10 +20,12 @@ cohort plus the earners the new players bring, at a fraction of the current rate
 estimated from past refreshes (small for grinds, near one for the opening
 mission). The forecast is a two-branch mixture -- a refresh happens before the
 target, or it does not -- with the refresh probability from the time since the
-last refresh against the refresh interval, so the quantiles honestly span the
-refresh-or-not gap. Spreads widen with the horizon and with how much the
-history moved. Everything is deterministic: no randomness, no network, no
-model calls, standard library only.
+last refresh against the refresh interval; where no refresh has been seen, the
+staleness is censored (the last refresh predates the first read), so the
+probability uses the effective staleness, the measured staleness plus the
+equilibrium mean age of a refresh cycle. Spreads widen with the horizon and
+with how much the history moved. Everything is deterministic: no randomness, no
+network, no model calls, standard library only.
 """
 
 import json
@@ -216,10 +218,18 @@ def project_players(view):
     growth = math.exp(PRIOR_GROWTH_PER_HOUR * span)
     growth = min(growth, 30.0)
     log_sd = math.sqrt(PRIOR_GROWTH_LOG_SD ** 2 + 0.04 * horizon / 24.0)
-    remaining = max(1.0, PRIOR_REFRESH_INTERVAL_H - elapsed)
+    # The staleness is censored: the last refresh happened at or before the
+    # first read, so the page is at least as stale as measured and the
+    # refresh is at least as overdue. Judge how soon the next refresh lands
+    # from the effective staleness -- the measured staleness plus the
+    # equilibrium mean age of a refresh cycle (half the prior interval) --
+    # while the growth still counts only the growth since the first read,
+    # which is what the history shows.
+    effective = elapsed + 0.5 * PRIOR_REFRESH_INTERVAL_H
+    remaining = max(1.0, PRIOR_REFRESH_INTERVAL_H - effective)
     refresh_prob = min(1.0, horizon / remaining)
     # A stale count on launch day is very likely to refresh soon.
-    refresh_prob = max(refresh_prob, 1.0 - math.exp(-span / PRIOR_REFRESH_INTERVAL_H))
+    refresh_prob = max(refresh_prob, 1.0 - math.exp(-(effective + horizon) / PRIOR_REFRESH_INTERVAL_H))
     return growth, log_sd, min(1.0, max(0.0, refresh_prob))
 
 
